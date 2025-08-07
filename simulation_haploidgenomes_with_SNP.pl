@@ -11,11 +11,11 @@ sub usage {
 Usage: $0 -v <vcf_file> -r <ref_file> -s <sample_name> -o <output_prefix>
 
 Options:
-    -v <vcf_file>       Specify the input VCF file.
-    -r <ref_file>       Specify the reference FASTA file.
-    -s <sample_name>    Specify the sample name in the VCF file.
-    -o <output_prefix>  Specify the output file prefix (e.g., 'hap' for SampleA_hap1.fa and SampleA_hap2.fa).
-    -h                  Display this help message.
+    -v <vcf_file>       Input VCF file containing SNPs
+    -r <ref_file>       Reference genome FASTA file
+    -s <sample_name>    Sample name in VCF (e.g., "AT01")
+    -o <output_prefix>  Output prefix (e.g., "hap" generates SampleA_hap1.fa)
+    -h                  Show this help message
 END_USAGE
     exit;
 }
@@ -24,91 +24,96 @@ END_USAGE
 my %options;
 getopts('v:r:s:o:h', \%options);
 
-# Display help if -h is provided or no arguments are given
+# Show help if requested or missing required args
 usage() if $options{h} || !$options{v} || !$options{r} || !$options{s} || !$options{o};
 
-# Input and output files
-my $vcf_file = $options{v};       # VCF file
-my $ref_file = $options{r};       # Reference FASTA file
-my $sample_name = $options{s};    # Sample name in VCF file
-my $output_prefix = $options{o};  # Output file prefix
+# Input/Output files
+my $vcf_file    = $options{v};      # Input VCF
+my $ref_file    = $options{r};      # Reference FASTA
+my $sample_name = $options{s};      # Sample name in VCF
+my $out_prefix  = $options{o};      # Output prefix
 
-# Read the reference FASTA file
+# 1. Read reference genome
 my @ref_fasta = read_file($ref_file);
 my %ref_seqs;
 my $current_chrom;
-for my $line (@ref_fasta) {
+foreach my $line (@ref_fasta) {
     chomp $line;
     if ($line =~ /^>(\S+)/) {
         $current_chrom = $1;
     } else {
-        $ref_seqs{$current_chrom} .= $line;
+        $ref_seqs{$current_chrom} .= uc($line);  # Store as uppercase
     }
 }
 
-# Initialize haplotypes
-my %hap1_seqs = %ref_seqs;  # hap1.fa starts with the reference sequences
-my %hap2_seqs = %ref_seqs;  # hap2.fa starts with the reference sequences
+# 2. Initialize haplotypes
+my %hap1 = %ref_seqs;  # Haplotype 1 (initialized as reference)
+my %hap2 = %ref_seqs;  # Haplotype 2 (initialized as reference)
 
-# Open the VCF file
-open(my $vcf_fh, '<', $vcf_file) or die "Cannot open VCF file $vcf_file: $!";
+# 3. Process VCF file
+open(my $vcf_fh, '<', $vcf_file) or die "Cannot open VCF file: $!";
 
-# Find the sample column index
-my $sample_index = -1;
+# Find sample column index
+my $sample_col = -1;
 while (my $line = <$vcf_fh>) {
-    chomp $line;
-    if ($line =~ /^#CHROM/) {
-        my @fields = split("\t", $line);  # 使用制表符分割
-        for (my $i = 9; $i < @fields; $i++) {
-            if ($fields[$i] eq $sample_name) {
-                $sample_index = $i;
-                last;
-            }
+    next if $line !~ /^#CHROM/;
+    my @headers = split("\t", $line);
+    for (my $i = 9; $i < @headers; $i++) {
+	$headers[$i] =~ s/[\"\'\s]//g;
+        if ($headers[$i] eq $sample_name) {
+            $sample_col = $i;
+            last;
         }
-        last;
     }
+    last;
 }
-die "Sample '$sample_name' not found in VCF file.\n" if $sample_index == -1;
+die "Sample '$sample_name' not found in VCF!" if $sample_col == -1;
 
-# Process each variant in the VCF file
+# Process each variant
 while (my $line = <$vcf_fh>) {
+    next if $line =~ /^#/;  # Skip headers
     chomp $line;
-    my ($chrom, $pos, $id, $ref, $alt, $qual, $filter, $info, $format, @genotypes) = split("\t", $line);
-    my $genotype = $genotypes[$sample_index - 9];
-    my ($gt, @fields) = split(':', $genotype);
-
-    # Replace bases in hap1.fa for 1/1 variants
+    my ($chrom, $pos, $id, $ref, $alt, $qual, $filter, $info, $format, @samples) = split("\t", $line);
+    
+    # Extract genotype (GT) for the target sample
+    my $sample_gt = $samples[$sample_col - 9];
+    my ($gt) = split(':', $sample_gt);  # Get GT (e.g., "0/1")
+    
+    # Skip if no genotype call (e.g., "./.")
+    next if $gt !~ /^(\d+)[\/|](\d+)/;
+    
+    # Process SNPs (skip INDELs if length differs)
+    next if length($ref) != length($alt);
+    
+    # Fix: 1/1 modifies BOTH haplotypes
     if ($gt eq '1/1') {
-        substr($hap1_seqs{$chrom}, $pos - 1, length($ref)) = $alt;
-    }
-
-    # Replace bases in hap2.fa for 0/1 variants
-    if ($gt eq '0/1') {
-        substr($hap2_seqs{$chrom}, $pos - 1, length($ref)) = $alt;
+        substr($hap1{$chrom}, $pos - 1, length($ref)) = $alt;
+        substr($hap2{$chrom}, $pos - 1, length($ref)) = $alt;  # Fixed line
+    } 
+    # 0/1 modifies only haplotype 2
+    elsif ($gt eq '0/1') {
+        substr($hap2{$chrom}, $pos - 1, length($ref)) = $alt;
     }
 }
 close($vcf_fh);
 
-# Write hap1.fa
-my $hap1_file = "${sample_name}_${output_prefix}1.fa";  # 输出文件名带上样本名
-open(my $hap1_fh, '>', $hap1_file) or die "Cannot open file $hap1_file: $!";
-for my $chrom (sort keys %hap1_seqs) {
-    print $hap1_fh ">$chrom\n";
-    while ($hap1_seqs{$chrom} =~ /(.{1,70})/g) {
-        print $hap1_fh "$1\n";
+# 4. Write output FASTA files
+sub write_fasta {
+    my ($file, $seqs) = @_;
+    open(my $fh, '>', $file) or die "Cannot write to $file: $!";
+    foreach my $chrom (sort keys %$seqs) {
+        print $fh ">$chrom\n";
+        my $seq = $$seqs{$chrom};
+        while ($seq =~ /(.{1,80})/g) {  # 80 chars per line
+            print $fh "$1\n";
+        }
     }
+    close($fh);
 }
-close($hap1_fh);
 
-# Write hap2.fa
-my $hap2_file = "${sample_name}_${output_prefix}2.fa";  # 输出文件名带上样本名
-open(my $hap2_fh, '>', $hap2_file) or die "Cannot open file $hap2_file: $!";
-for my $chrom (sort keys %hap2_seqs) {
-    print $hap2_fh ">$chrom\n";
-    while ($hap2_seqs{$chrom} =~ /(.{1,70})/g) {
-        print $hap2_fh "$1\n";
-    }
-}
-close($hap2_fh);
+write_fasta("${sample_name}_${out_prefix}1.fa", \%hap1);
+write_fasta("${sample_name}_${out_prefix}2.fa", \%hap2);
 
-print "Haplotype files have been generated: $hap1_file and $hap2_file\n";
+print "Generated:\n";
+print "  - ${sample_name}_${out_prefix}1.fa (Haplotype 1)\n";
+print "  - ${sample_name}_${out_prefix}2.fa (Haplotype 2)\n";
