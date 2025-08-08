@@ -88,7 +88,7 @@ while (my $line = <$vcf_fh>) {
     # Fix: 1/1 modifies BOTH haplotypes
     if ($gt eq '1/1') {
         substr($hap1{$chrom}, $pos - 1, length($ref)) = $alt;
-        substr($hap2{$chrom}, $pos - 1, length($ref)) = $alt;  # Fixed line
+        substr($hap2{$chrom}, $pos - 1, length($ref)) = $alt;
     } 
     # 0/1 modifies only haplotype 2
     elsif ($gt eq '0/1') {
