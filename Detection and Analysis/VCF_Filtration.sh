@@ -33,9 +33,16 @@ perl /path/to/find_dp.pl all.chr_snp.DP.txt.gz all.DP0.25.txt <Number from Tiger
 perl /path/to/filter_dp.pl Tiger_SNP_hardfil_ture_2allelic.vcf.gz  Tiger_SNP_hardfil_true.2allelic.dp2.5.vcf.gz <Sample size> <Number1 from all.DP0.25.txt>  <Number2 from all.DP0.25.txt>
 
 #step7: PL value filtering
-
+perl /path/to/filter_PLvalue.pl Tiger_SNP_hardfil_true.2allelic.dp2.5.vcf.gz Tiger.SNP_true.DP0.5.PL20.vcf.gz 0.2 20 8
 
 #step8: MAF filtering
+vcftools --gzvcf  Tiger.SNP_true.DP0.5.PL20.vcf.gz --maf 0.01 --recode --out Tiger.SNP_true.DP0.5.PL20.maf01 --recode-INFO-all
 
+#step9: Rename
+echo "NC_056660.1 chr1
+NC_056666.1 chr2
+NC_056672.1 chr3
+NC_056674.1 chr4" >list
+bcftools annotate --rename-chrs list Tiger.SNP_true.DP0.5.PL20.maf01.recode.vcf -Oz -o Tiger.SNP_true.DP0.5.PL20.maf01.recode.vcf.gz
 
 #The final variant set can be used for ROH detection using two methods.
