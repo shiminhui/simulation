@@ -38,6 +38,9 @@ perl /path/to/filter_PLvalue.pl Tiger_SNP_hardfil_true.2allelic.dp2.5.vcf.gz Tig
 #step8: MAF filtering
 vcftools --gzvcf  Tiger.SNP_true.DP0.5.PL20.vcf.gz --maf 0.01 --recode --out Tiger.SNP_true.DP0.5.PL20.maf01 --recode-INFO-all
 
+#We show here the commonly used filtering process. 
+#In the simulation analysis of this study, no filtering such as MAF was performed for over-analysis.
+
 #step9: Rename
 echo "NC_056660.1 chr1
 NC_056666.1 chr2
